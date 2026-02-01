@@ -3,64 +3,75 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
 
-st.set_page_config(page_title="Weight Loss Tracker", layout="wide")
+st.set_page_config(page_title="Weight Tracker Pro", layout="wide")
 
-# Initialize session state to store data if not using a database yet
-if 'data' not in st.session_state:
-    st.session_state.data = pd.DataFrame(columns=['Date', 'Intake', 'Gym', 'Deficit'])
+# Initialize data in session state
+if 'df' not in st.session_state:
+    # Creating a sample starting row based on your current progress
+    st.session_state.df = pd.DataFrame(columns=['Date', 'Intake', 'Gym', 'Deficit'])
 
 st.title("📉 Weight Loss Dashboard")
 
-# --- SIDEBAR INPUTS ---
+# --- SIDEBAR: ADD NEW ENTRY ---
 with st.sidebar:
     st.header("Log Daily Entry")
-    entry_date = st.date_input("Date", date.today())
-    intake = st.number_input("Calorie Intake", min_value=0, value=2000, step=50)
-    gym_visit = st.checkbox("Did you go to the gym?")
-    
-    if st.button("Add Entry"):
-        # Logic: 2700 if gym, 2500 if no gym
-        tdee = 2700 if gym_visit else 2500
-        daily_deficit = tdee - intake
+    with st.form("entry_form", clear_on_submit=True):
+        entry_date = st.date_input("Date", date.today())
+        intake = st.number_input("Calorie Intake (kcal)", min_value=0, value=2000)
+        gym_visit = st.checkbox("Gym Session?")
+        submit = st.form_submit_button("Add Entry")
         
-        new_entry = pd.DataFrame({
-            'Date': [entry_date], 
-            'Intake': [intake], 
-            'Gym': [gym_visit], 
-            'Deficit': [daily_deficit]
-        })
-        st.session_state.data = pd.concat([st.session_state.data, new_entry], ignore_index=True)
-        st.success("Entry Saved!")
+        if submit:
+            tdee = 2700 if gym_visit else 2500
+            new_row = pd.DataFrame([{
+                'Date': entry_date, 
+                'Intake': intake, 
+                'Gym': gym_visit, 
+                'Deficit': tdee - intake
+            }])
+            st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
+            st.rerun()
 
-# --- DASHBOARD METRICS ---
-df = st.session_state.data
+# --- MAIN DISPAY ---
+df = st.session_state.df
+
 if not df.empty:
+    # 1. METRICS
     total_deficit = df['Deficit'].sum()
-    # Approx 7700 kcal = 1kg weight loss
-    est_weight_loss = total_deficit / 7700 
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Entries", len(df))
-    col2.metric("Total Deficit", f"{total_deficit} kcal")
-    col3.metric("Est. Weight Loss", f"{est_weight_loss:.2f} kg")
+    col1, col2 = st.columns(2)
+    col1.metric("Total Cumulative Deficit", f"{total_deficit} kcal")
+    col2.metric("Est. Weight Loss", f"{total_deficit / 7700:.2f} kg")
 
-    # --- WATERFALL CHART ---
+    # 2. WATERFALL CHART
     fig = go.Figure(go.Waterfall(
-        name="Deficit",
-        orientation="v",
+        name="Deficit", orientation="v",
         measure=["relative"] * len(df),
-        x=df['Date'],
+        x=df.index, # Using index so dates can repeat if needed
         y=df['Deficit'],
-        connector={"line": {"color": "rgb(63, 63, 63)"}},
-        decreasing={"marker": {"color": "#EF553B"}}, # Red for negative deficit (overeating)
-        increasing={"marker": {"color": "#00CC96"}}, # Green for positive deficit
+        decreasing={"marker": {"color": "#EF553B"}},
+        increasing={"marker": {"color": "#00CC96"}},
     ))
-
-    fig.update_layout(title="Cumulative Deficit Progress", showlegend=False)
+    fig.update_layout(title="Progress Waterfall", xaxis_title="Entry Number")
     st.plotly_chart(fig, use_container_width=True)
+
+    # 3. EDIT & DELETE SECTION
+    st.subheader("Edit or Delete Entries")
+    st.write("Double-click any cell to edit. The 'Deficit' will auto-recalculate.")
     
-    # Show Raw Data
-    st.subheader("History")
-    st.dataframe(df.sort_values(by='Date', ascending=False), use_container_width=True)
+    # Data Editor - this allows direct editing
+    edited_df = st.data_editor(
+        df, 
+        num_rows="dynamic", # Allows you to delete rows by selecting them
+        use_container_width=True,
+        key="data_editor"
+    )
+
+    # Recalculate deficit if intake or gym status changed in the editor
+    if not edited_df.equals(df):
+        edited_df['Deficit'] = edited_df.apply(
+            lambda x: (2700 if x['Gym'] else 2500) - x['Intake'], axis=1
+        )
+        st.session_state.df = edited_df
+        st.rerun()
 else:
-    st.info("Start by adding your first entry in the sidebar!")
+    st.info("No data yet. Use the sidebar to log your first meal!")
